@@ -6,7 +6,7 @@ import pandas as pd
 from transformers import LlamaTokenizer
 from .randaugment import RandomAugment
 
-class VQARADDataset(Dataset):
+class VQA_RAD_Dataset(Dataset):
     """
     Args:
         csv_path (str): Path to the CSV file containing the dataset.
