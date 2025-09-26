@@ -1,182 +1,120 @@
 import argparse
 import os
-import json
-import math
-import tqdm.auto as tqdm
-from typing import Optional
-import transformers
-from Dataset.VQA_RAD_Dataset import VQA_RAD_Dataset
-from model.QA_model import QA_model
-from transformers import Trainer
-from dataclasses import dataclass, field
-import os
-from torch.utils.data import DataLoader  
-import torch
-import numpy as np  
-import difflib 
 import csv
+import transformers
+from dataclasses import dataclass, field
+from typing import Optional
+import torch
+from torch.utils.data import DataLoader
+import tqdm.auto as tqdm
+
+from Dataset.VQA_RAD_Dataset import VQA_RAD_Dataset
+from models.QA_model import QA_model
+
 @dataclass
 class ModelArguments:
-    model_path: Optional[str] = field(default="./LLAMA/llama-7b-hf")
+    model_path: Optional[str] = field(default="./LLaMA/7B_hf")
     ckp: Optional[str] = field(default="./Results/QA_no_pretrain_no_aug/VQA_RAD/checkpoint-16128")
-    checkpointing: Optional[bool] = field(default=False)
-    ## Q_former ##
     N: Optional[int] = field(default=12)
     H: Optional[int] = field(default=8)
     img_token_num: Optional[int] = field(default=32)
-    
-    ## Basic Setting ##
     voc_size: Optional[int] = field(default=32000)
     hidden_dim: Optional[int] = field(default=4096)
-    
-    ## Image Encoder ##
     Vision_module: Optional[str] = field(default='PMC-CLIP')
     visual_model_path: Optional[str] = field(default='./img_checkpoint/PMC-CLIP/checkpoint.pt')
-    
-    ## Peft ##
     is_lora: Optional[bool] = field(default=True)
     peft_mode: Optional[str] = field(default="lora")
     lora_rank: Optional[int] = field(default=8)
 
 @dataclass
 class DataArguments:
-    img_dir: str = field(default='./Data/VQA_RAD/VQA_RAD_Image_Folder/', metadata={"help": "Path to the training data."})
-    Test_csv_path: str = field(default='./Data/VQA_RAD/test_close.csv', metadata={"help": "Path to the training data."})
-    tokenizer_path: str = field(default='./LLAMA/tokenizer', metadata={"help": "Path to the training data."})
-    trier: int = field(default=0)
-@dataclass
-class TrainingArguments(transformers.TrainingArguments):
-    output_dir: Optional[str] = field(default="./Results")
-    cache_dir: Optional[str] = field(default=None)
-    optim: str = field(default="adamw_torch")
+    img_dir: str = field(default='./Data/VQA_RAD_Image_Folder/', metadata={"help": "Path to the image directory."})
+    Test_csv_path: str = field(default='./Data/VQA_RAD/test.csv', metadata={"help": "Path to the test data csv."})
+    tokenizer_path: str = field(default='./LLaMA/tokenizer', metadata={"help": "Path to the tokenizer."})
 
-
-def str_similarity(str1, str2):
-    seq = difflib.SequenceMatcher(None, str1, str2)
-    return seq.ratio()
- 
-def find_most_similar_index(str_list, target_str):
-    """
-    Given a list of strings and a target string, returns the index of the most similar string in the list.
-    """
-    # Initialize variables to keep track of the most similar string and its index
-    most_similar_str = None
-    most_similar_index = None
-    highest_similarity = 0
-    
-    # Iterate through each string in the list
-    for i, str in enumerate(str_list):
-        # Calculate the similarity between the current string and the target string
-        similarity = str_similarity(str, target_str)
+# REFACTORED: Created a single function to handle evaluation logic
+def run_evaluation(model, dataloader, tokenizer, device, output_filename):
+    """Runs model inference on the provided dataloader and saves results to a CSV."""
+    model.eval()
+    with open(output_filename, mode='w', newline='') as outfile:
+        writer = csv.writer(outfile)
+        writer.writerow(['Question', 'Prediction', 'Label', 'Image_Path'])
         
-        # If the current string is more similar than the previous most similar string, update the variables
-        if similarity > highest_similarity:
-            most_similar_str = str
-            most_similar_index = i
-            highest_similarity = similarity
-    
-    # Return the index of the most similar string
-    return most_similar_index
-  
+        for sample in tqdm.tqdm(dataloader, desc=f"Evaluating {os.path.basename(output_filename)}"):
+            # FIXED: Directly use the tokenized tensor from the dataloader
+            input_ids = sample['input_ids'].to(device)
+            images = sample['images'].to(device)
+            
+            with torch.no_grad():
+                # Assuming `generate` is the correct method name in your QA_model
+                generation_ids = model.generate(input_ids=input_ids, images=images, max_new_tokens=256)
+            
+            # The generated IDs include the prompt, so we slice it off
+            prompt_len = input_ids.shape[1]
+            generated_ids_only = generation_ids[:, prompt_len:]
+            
+            generated_texts = tokenizer.batch_decode(generated_ids_only, skip_special_tokens=True)
+            
+            # Unpack results for this batch
+            questions = sample['question']
+            labels = sample['answer']
+            img_names = [os.path.basename(p) for p in sample.get('img_name', ['N/A']*len(questions))]
+
+            for i in range(len(generated_texts)):
+                writer.writerow([questions[i], generated_texts[i], labels[i], img_names[i]])
+
 def main():
-    parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
-    model_args, data_args, training_args = parser.parse_args_into_dataclasses()
-    
-    print("Setup Data")
-    row_count = 0
-    # if os.path.exists('result_final'+str(data_args.trier)+'.csv'): 
-        
-    #     with open('result_final'+str(data_args.trier)+'.csv', 'r') as file:
-    #         reader = csv.reader(file)
-    #         row_count = sum(1 for row in reader)-1      
-    Test_dataset_close = VQA_RAD_Dataset(data_args.Test_csv_path, data_args.tokenizer_path,mode='Test',text_type='blank',start=row_count)
-    
-    # batch size should be 1
-    Test_dataloader_close = DataLoader(
-            Test_dataset_close,
-            batch_size=1,
-            num_workers=1,
-            pin_memory=True,
-            sampler=None,
-            shuffle=False,
-            collate_fn=None,
-            drop_last=False,
-    ) 
-    Test_dataset_open = VQA_RAD_Dataset(data_args.Test_csv_path.replace('close.csv','open.csv'), data_args.tokenizer_path,mode='Test',text_type='blank',start=row_count)
-    
-    # batch size should be 1
-    Test_dataloader_open = DataLoader(
-            Test_dataset_open,
-            batch_size=1,
-            num_workers=1,
-            pin_memory=True,
-            sampler=None,
-            shuffle=False,
-            collate_fn=None,
-            drop_last=False,
-    )  
+    parser = transformers.HfArgumentParser((ModelArguments, DataArguments))
+    model_args, data_args = parser.parse_args_into_dataclasses()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     print("Setup Model")
-    ckp = model_args.ckp + '/pytorch_model.bin'
-    print(ckp)
+    # Correctly build the path to the model binary
+    ckp_path = os.path.join(model_args.ckp, 'pytorch_model.bin')
+    print(f"Loading checkpoint from: {ckp_path}")
+
     model = QA_model(model_args)
-    ckpt = torch.load(ckp, map_location='cpu')
-    # if you have problem in loading, it may cause by the peft package updating and use the following code:
-    # for name in list(ckpt.keys()):
-    #     if 'self_attn.q_proj.weight' in name and "vision_model" not in name:
-    #         new_name = name.replace('self_attn.q_proj.weight', 'self_attn.q_proj.base_layer.weight')
-    #         ckpt[new_name] = ckpt.pop(name)
-    #     if 'self_attn.v_proj.weight' in name and "vision_model" not in name:
-    #         new_name = name.replace('self_attn.v_proj.weight', 'self_attn.v_proj.base_layer.weight')
-    #         ckpt[new_name] = ckpt.pop(name)
-    #     if 'lora_A' in name:
-    #         new_name = name.replace('lora_A', 'lora_A.default')
-    #         ckpt[new_name] = ckpt.pop(name)
-    #     if 'lora_B' in name:
-    #         new_name = name.replace('lora_B', 'lora_B.default')
-    #         ckpt[new_name] = ckpt.pop(name)
+    ckpt = torch.load(ckp_path, map_location='cpu')
     model.load_state_dict(ckpt)
+    model.to(device)
     
-    ACC = 0
-    cc = 0
-    model = model.to('cuda')
-    model.eval()
-    #Test_dataset.tokenizer.padding_side = "left" 
+    tokenizer = VQA_RAD_Dataset.tokenizer # Re-use the tokenizer from the class for decoding
+
+    # --- Setup for "close" answer test ---
+    print("Setting up 'close' answer dataset")
+    test_close_csv = data_args.Test_csv_path.replace('.csv', '_close.csv')
+    # UPDATED: Correctly initialize the dataset
+    test_dataset_close = VQA_RAD_Dataset(
+        csv_path=test_close_csv,
+        tokenizer_path=data_args.tokenizer_path,
+        img_dir=data_args.img_dir,
+        mode='Test'
+    )
+    test_dataloader_close = DataLoader(test_dataset_close, batch_size=8, shuffle=False, num_workers=4)
     
-    with open('result_final_greedy_VQA_RAD_close'+model_args.ckp.split('/')[-3]+'_'+ model_args.ckp.split('/')[-2]+'.csv', mode='w') as outfile:
-            writer = csv.writer(outfile)
-            writer.writerow(['Figure_path','Question','Pred','Label'])
-            for sample in tqdm.tqdm(Test_dataloader_close):
-                input_ids = Test_dataset_close.tokenizer(sample['input_ids'],return_tensors="pt").to('cuda')
-                input_ids['input_ids'][0][0]=1
-                images = sample['images'].to('cuda')
-                with torch.no_grad():
-                    generation_ids = model.generate_long_sentence(input_ids['input_ids'],images)
-                generated_texts = Test_dataset_close.tokenizer.batch_decode(generation_ids, skip_special_tokens=True) 
-                for i in range(len(generated_texts)):
-                    label = sample['labels'][i]
-                    img_path = sample['img_path'][i]
-                    pred = generated_texts[i]
-                    writer.writerow([img_path,sample['input_ids'][i],pred,label])
-                    cc = cc + 1
-    with open('result_final_greedy_VQA_RAD_open'+model_args.ckp.split('/')[-3]+'_'+ model_args.ckp.split('/')[-2]+'.csv', mode='w') as outfile:
-            writer = csv.writer(outfile)
-            writer.writerow(['Figure_path','Question','Pred','Label'])
-            for sample in tqdm.tqdm(Test_dataloader_open):
-                input_ids = Test_dataset_open.tokenizer(sample['input_ids'],return_tensors="pt").to('cuda')
-                input_ids['input_ids'][0][0]=1
-                images = sample['images'].to('cuda')
-                with torch.no_grad():
-                    generation_ids = model.generate_long_sentence(input_ids['input_ids'],images)
-                generated_texts = Test_dataset_open.tokenizer.batch_decode(generation_ids, skip_special_tokens=True) 
-                for i in range(len(generated_texts)):
-                    label = sample['labels'][i]
-                    img_path = sample['img_path'][i]
-                    pred = generated_texts[i]
-                    writer.writerow([img_path,sample['input_ids'][i],pred,label])
-                    cc = cc + 1
+    # --- Setup for "open" answer test ---
+    print("Setting up 'open' answer dataset")
+    test_open_csv = data_args.Test_csv_path.replace('.csv', '_open.csv')
+    # UPDATED: Correctly initialize the dataset
+    test_dataset_open = VQA_RAD_Dataset(
+        csv_path=test_open_csv,
+        tokenizer_path=data_args.tokenizer_path,
+        img_dir=data_args.img_dir,
+        mode='Test'
+    )
+    test_dataloader_open = DataLoader(test_dataset_open, batch_size=8, shuffle=False, num_workers=4)
+
+    # --- Run Evaluations ---
+    # Define output filenames based on the checkpoint directory
+    base_output_name = os.path.basename(os.path.normpath(model_args.ckp))
+    
+    output_file_close = f"results_close_{base_output_name}.csv"
+    output_file_open = f"results_open_{base_output_name}.csv"
+    
+    run_evaluation(model, test_dataloader_close, tokenizer, device, output_file_close)
+    run_evaluation(model, test_dataloader_open, tokenizer, device, output_file_open)
+
+    print("Evaluation complete. Results saved to CSV files.")
+
 if __name__ == "__main__":
-    #os.environ['CUDA_VISIBLE_DEVICES'] = '2'
     main()
-    
-#CUDA_VISIBLE_DEVICES=0  python test_VQA_RAD.py
