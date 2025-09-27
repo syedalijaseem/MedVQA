@@ -1,12 +1,14 @@
+import os
 import json
 import pandas as pd
 import argparse
-import os
+from tqdm import tqdm
 
 def main():
     """
-    Reads the single, official VQA_RAD_Dataset JSON file, splits it into train and test sets at
-    the QUESTION level, and further splits the test set into open-ended and close-ended questions.
+    Reads the single, official VQA_RAD JSON file, splits it into train and test sets
+    at the QUESTION level, and further splits the test set into open-ended and 
+    close-ended questions, saving them as separate CSV files.
     
     The official VQA-RAD dataset can be downloaded from: https://osf.io/89kps/files/osfstorage
     This script correctly follows the official train/test split methodology.
@@ -30,25 +32,31 @@ def main():
     with open(args.json_path, 'r') as f:
         data = json.load(f)
 
-    train_rows = []
-    test_rows = []
+    df = pd.DataFrame(data)
 
-    # Split data based on whether 'phrase_type' contains the word 'test'
-    for item in data:
-        entry = {
-            'image_name': item.get('image_name'),
-            'question': item.get('question'),
-            'answer': item.get('answer'),
-            'answer_type': item.get('answer_type', 'OPEN').upper()
-        }
-        if 'test' in item.get('phrase_type', ''):
-            test_rows.append(entry)
-        else:
-            train_rows.append(entry)
+    # --- Initial Data Analysis ---
+    print("\n--- Initial Dataset Analysis ---")
+    total_questions = len(df)
+    total_unique_images = len(df['image_name'].unique())
+    df['answer_type'] = df['answer_type'].str.upper() # Standardize column
+    total_open = len(df[df['answer_type'] == 'OPEN'])
+    total_close = len(df[df['answer_type'] == 'CLOSED'])
+    
+    print(f"Total Question-Answer Pairs: {total_questions}")
+    print(f"Total Unique Images: {total_unique_images}")
+    print(f"  - Total Open-Ended Questions: {total_open}")
+    print(f"  - Total Close-Ended Questions: {total_close}")
 
-    # --- Create DataFrames from the question-level split ---
+    # --- Create DataFrames based on Question-Level Split ---
+    train_rows = [item for item in data if 'test' not in item.get('phrase_type', '')]
+    test_rows = [item for item in data if 'test' in item.get('phrase_type', '')]
+
     df_train = pd.DataFrame(train_rows)
     df_test = pd.DataFrame(test_rows)
+    
+    # Standardize answer_type columns for accurate counting
+    df_train['answer_type'] = df_train['answer_type'].str.upper()
+    df_test['answer_type'] = df_test['answer_type'].str.upper()
 
     # --- Create and Save CSV Files ---
     os.makedirs(args.output_dir, exist_ok=True)
@@ -58,21 +66,30 @@ def main():
     df_train[['image_name', 'question', 'answer']].to_csv(train_csv_path, index=False)
     
     # Split test data into open and close and save
-    df_open = df_test[df_test['answer_type'] == 'OPEN']
-    df_close = df_test[df_test['answer_type'] == 'CLOSED']
+    df_test_open = df_test[df_test['answer_type'] == 'OPEN']
+    df_test_close = df_test[df_test['answer_type'] == 'CLOSED']
     
     open_csv_path = os.path.join(args.output_dir, "test_open.csv")
     close_csv_path = os.path.join(args.output_dir, "test_close.csv")
     
-    df_open[['image_name', 'question', 'answer']].to_csv(open_csv_path, index=False)
-    df_close[['image_name', 'question', 'answer']].to_csv(close_csv_path, index=False)
+    df_test_open[['image_name', 'question', 'answer']].to_csv(open_csv_path, index=False)
+    df_test_close[['image_name', 'question', 'answer']].to_csv(close_csv_path, index=False)
 
-    print("\n--- Pre-processing Complete ---")
-    print(f"Total training questions: {len(df_train)}")
-    print(f"Total testing questions: {len(df_test)}")
-    print(f"  - Open-ended test questions: {len(df_open)}")
-    print(f"  - Close-ended test questions: {len(df_close)}")
-    print(f"\nSaved files to: {args.output_dir}")
+    # --- Final Detailed Summary ---
+    print("\n--- Final Data Split Summary ---")
+    print(f"Training Set:")
+    print(f"  - Total Questions: {len(df_train)}")
+    print(f"    - Open-Ended: {len(df_train[df_train['answer_type'] == 'OPEN'])}")
+    print(f"    - Close-Ended: {len(df_train[df_train['answer_type'] == 'CLOSED'])}")
+    print(f"  - Unique Images: {len(df_train['image_name'].unique())}")
+    
+    print(f"\nTest Set:")
+    print(f"  - Total Questions: {len(df_test)}")
+    print(f"    - Open-Ended (test_open.csv): {len(df_test_open)}")
+    print(f"    - Close-Ended (test_close.csv): {len(df_test_close)}")
+    print(f"  - Unique Images: {len(df_test['image_name'].unique())}")
+    
+    print(f"\nPre-processing complete. Files saved to: {args.output_dir}")
 
 if __name__ == "__main__":
     main()
