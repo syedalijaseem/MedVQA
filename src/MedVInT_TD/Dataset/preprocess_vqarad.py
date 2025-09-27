@@ -102,7 +102,7 @@ def main():
     print(f"  - Close: {len(df_test_close)}")
     print(f"Images in train folder: {len(os.listdir(train_image_dir))}")
     print(f"Images in test folder: {len(os.listdir(test_image_dir))}")
-    print(f"\n✅ All pre-processing tasks are complete.")
+    print(f"\nAll pre-processing tasks are complete.")
 
 if __name__ == "__main__":
     main()
