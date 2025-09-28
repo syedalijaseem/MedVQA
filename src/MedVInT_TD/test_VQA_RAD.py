@@ -106,7 +106,7 @@ def main():
         img_dir=test_image_dir, # Use correct subfolder path
         mode='Test'
     )
-    test_dataloader_close = DataLoader(test_dataset_close, batch_size=8, shuffle=False, num_workers=4)
+    test_dataloader_close = DataLoader(test_dataset_close, batch_size=8, shuffle=False, num_workers=1)
     
     # Setup for "open" answer test
     test_open_csv = data_args.Test_csv_path.replace('test.csv', 'test_open.csv')
@@ -116,7 +116,7 @@ def main():
         img_dir=test_image_dir, # Use correct subfolder path
         mode='Test'
     )
-    test_dataloader_open = DataLoader(test_dataset_open, batch_size=8, shuffle=False, num_workers=4)
+    test_dataloader_open = DataLoader(test_dataset_open, batch_size=8, shuffle=False, num_workers=1)
 
     print("\n--- Running Evaluations ---")
     base_output_name = os.path.basename(os.path.normpath(model_args.ckp))
