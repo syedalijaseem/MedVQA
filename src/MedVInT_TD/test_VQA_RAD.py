@@ -87,7 +87,7 @@ def main():
 
     model = QA_model(model_args)
     ckpt = torch.load(ckp_path, map_location='cpu')
-    model.load_state_dict(ckpt)
+    model.load_state_dict(ckpt, strict=False)
     model.to(device)
     
     tokenizer = VQA_RAD_Dataset.tokenizer # Re-use the tokenizer from the class for decoding
