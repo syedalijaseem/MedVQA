@@ -80,17 +80,19 @@ def main():
     model_args, data_args = parser.parse_args_into_dataclasses()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    print("Setup Model")
-    # Correctly build the path to the model binary
-    ckp_path = os.path.join(model_args.ckp, 'pytorch_model.bin')
-    print(f"Loading checkpoint from: {ckp_path}")
-
+    print("--- Setting up Model ---")
     model = QA_model(model_args)
+    
+    ckp_path = os.path.join(model_args.ckp, 'pytorch_model.bin')
+    print(f"Loading adapter checkpoint from: {ckp_path}")
     ckpt = torch.load(ckp_path, map_location='cpu')
     model.load_state_dict(ckpt, strict=False)
+    
     model.to(device)
     
-    tokenizer = VQA_RAD_Dataset.tokenizer # Re-use the tokenizer from the class for decoding
+    # FIXED: Initialize the tokenizer directly instead of accessing the class
+    print(f"Loading tokenizer from: {data_args.tokenizer_path}")
+    tokenizer = transformers.LlamaTokenizer.from_pretrained(data_args.tokenizer_path)
 
     # --- Setup for "close" answer test ---
     print("Setting up 'close' answer dataset")
