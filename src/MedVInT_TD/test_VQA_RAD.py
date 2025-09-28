@@ -15,13 +15,25 @@ from models.QA_model import QA_model
 class ModelArguments:
     model_path: Optional[str] = field(default="./LLaMA/7B_hf")
     ckp: Optional[str] = field(default="./Results/QA_no_pretrain_no_aug/VQA_RAD/checkpoint-16128")
+    
+    # FIXED: Added the missing 'checkpointing' argument required by the QA_model.
+    # It should be False during evaluation.
+    checkpointing: Optional[bool] = field(default=False)
+    
+    # Q_former parameters
     N: Optional[int] = field(default=12)
     H: Optional[int] = field(default=8)
     img_token_num: Optional[int] = field(default=32)
+    
+    # Basic model settings
     voc_size: Optional[int] = field(default=32000)
     hidden_dim: Optional[int] = field(default=4096)
+    
+    # Image Encoder settings
     Vision_module: Optional[str] = field(default='PMC-CLIP')
     visual_model_path: Optional[str] = field(default='./img_checkpoint/PMC-CLIP/checkpoint.pt')
+    
+    # PEFT (LoRA) settings
     is_lora: Optional[bool] = field(default=True)
     peft_mode: Optional[str] = field(default="lora")
     lora_rank: Optional[int] = field(default=8)
