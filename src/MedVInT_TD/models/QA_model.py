@@ -139,11 +139,13 @@ class QA_model(nn.Module):
             return res_model
         except:
             raise ("Invalid model name. Check the config file and pass one of: resnet18 or resnet50")    
-
+        
     def Setup_model(self, model_args):
         print("Setup Model")
         model = transformers.LlamaForCausalLM.from_pretrained(
            model_args.model_path,
+           torch_dtype=torch.bfloat16,  # performance and memory savings
+           device_map="auto"           # loads sharded checkpoints
         )
         if model_args.checkpointing:
             model.gradient_checkpointing_enable()
