@@ -50,30 +50,30 @@ def run_evaluation(model, dataloader, tokenizer, device, output_filename):
     model.eval()
     with open(output_filename, mode='w', newline='') as outfile:
         writer = csv.writer(outfile)
-        writer.writerow(['Question', 'Prediction', 'Label', 'Image_Path'])
+        writer.writerow(['Question', 'Prediction', 'Label', 'Image_Name'])
         
         for sample in tqdm.tqdm(dataloader, desc=f"Evaluating {os.path.basename(output_filename)}"):
-            # FIXED: Directly use the tokenized tensor from the dataloader
             input_ids = sample['input_ids'].to(device)
             images = sample['images'].to(device)
             
             with torch.no_grad():
-                # Assuming `generate` is the correct method name in your QA_model
-                generation_ids = model.generate(input_ids=input_ids, images=images, max_new_tokens=256)
+                # Use the same generation method as the original author's script
+                generation_ids = model.generate_long_sentence(input_ids, images)
             
-            # The generated IDs include the prompt, so we slice it off
-            prompt_len = input_ids.shape[1]
-            generated_ids_only = generation_ids[:, prompt_len:]
+            # Decode the full generated text
+            generated_texts = tokenizer.batch_decode(generation_ids, skip_special_tokens=True)
             
-            generated_texts = tokenizer.batch_decode(generated_ids_only, skip_special_tokens=True)
-            
-            # Unpack results for this batch
+            # More robustly remove the prompt from the generated text
+            prompts = tokenizer.batch_decode(input_ids, skip_special_tokens=True)
+            predictions = [text.replace(prompt, '').strip() for text, prompt in zip(generated_texts, prompts)]
+
             questions = sample['question']
             labels = sample['answer']
-            img_names = [os.path.basename(p) for p in sample.get('img_name', ['N/A']*len(questions))]
+            # FIXED: Use 'image_name' to match the key from our corrected VQA_RAD_Dataset
+            image_names = sample['image_name']
 
-            for i in range(len(generated_texts)):
-                writer.writerow([questions[i], generated_texts[i], labels[i], img_names[i]])
+            for i in range(len(predictions)):
+                writer.writerow([questions[i], predictions[i], labels[i], image_names[i]])
 
 def main():
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments))
@@ -90,36 +90,35 @@ def main():
     
     model.to(device)
     
-    # FIXED: Initialize the tokenizer directly instead of accessing the class
     print(f"Loading tokenizer from: {data_args.tokenizer_path}")
     tokenizer = transformers.LlamaTokenizer.from_pretrained(data_args.tokenizer_path)
 
-    # --- Setup for "close" answer test ---
-    print("Setting up 'close' answer dataset")
-    test_close_csv = data_args.Test_csv_path.replace('.csv', '_close.csv')
-    # UPDATED: Correctly initialize the dataset
+    print("\n--- Setting up Datasets ---")
+    
+    # Define the correct path to the test images directory
+    test_image_dir = os.path.join(data_args.img_dir, 'test')
+    
+    # Setup for "close" answer test
+    test_close_csv = data_args.Test_csv_path.replace('test.csv', 'test_close.csv')
     test_dataset_close = VQA_RAD_Dataset(
         csv_path=test_close_csv,
         tokenizer_path=data_args.tokenizer_path,
-        img_dir=data_args.img_dir,
+        img_dir=test_image_dir, # Use correct subfolder path
         mode='Test'
     )
     test_dataloader_close = DataLoader(test_dataset_close, batch_size=8, shuffle=False, num_workers=4)
     
-    # --- Setup for "open" answer test ---
-    print("Setting up 'open' answer dataset")
-    test_open_csv = data_args.Test_csv_path.replace('.csv', '_open.csv')
-    # UPDATED: Correctly initialize the dataset
+    # Setup for "open" answer test
+    test_open_csv = data_args.Test_csv_path.replace('test.csv', 'test_open.csv')
     test_dataset_open = VQA_RAD_Dataset(
         csv_path=test_open_csv,
         tokenizer_path=data_args.tokenizer_path,
-        img_dir=data_args.img_dir,
+        img_dir=test_image_dir, # Use correct subfolder path
         mode='Test'
     )
     test_dataloader_open = DataLoader(test_dataset_open, batch_size=8, shuffle=False, num_workers=4)
 
-    # --- Run Evaluations ---
-    # Define output filenames based on the checkpoint directory
+    print("\n--- Running Evaluations ---")
     base_output_name = os.path.basename(os.path.normpath(model_args.ckp))
     
     output_file_close = f"results_close_{base_output_name}.csv"
@@ -128,7 +127,7 @@ def main():
     run_evaluation(model, test_dataloader_close, tokenizer, device, output_file_close)
     run_evaluation(model, test_dataloader_open, tokenizer, device, output_file_open)
 
-    print("Evaluation complete. Results saved to CSV files.")
+    print("\nEvaluation complete. Results saved to CSV files.")
 
 if __name__ == "__main__":
     main()
