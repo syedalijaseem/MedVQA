@@ -67,7 +67,7 @@ class VQA_RAD_Dataset(Dataset):
         answer = str(sample['answer'])  # Ensure answer is a string
         
         # --- Image Processing ---
-        img_path = f"{self.img_root}/{sample['img_name']}"
+        img_path = f"{self.img_root}/{sample['image_name']}"
         try:
             image = Image.open(img_path).convert('RGB')
             image_tensor = self.transform(image)
