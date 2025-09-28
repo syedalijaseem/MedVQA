@@ -197,6 +197,9 @@ class QA_model(nn.Module):
         features = F.relu(features)
         features = self.fc_l2(features)
         features = rearrange(features,'(b n) d -> b n d',b=B)
+        # FIXED: Convert features to the same dtype as the LLM
+        features = features.to(torch.bfloat16)
+
         ### LLM ###
         input_embedding = self.llamacasual.get_input_embeddings()(input_ids)
         input_embedding = torch.cat([features,input_embedding], dim=1)
@@ -247,6 +250,9 @@ class QA_model(nn.Module):
             features = F.relu(features)
             features = self.fc_l2(features)
             features = rearrange(features,'(b n) d -> b n d',b=B)
+            # FIXED: Convert features to the same dtype as the LLM
+            features = features.to(torch.bfloat16)
+
             ### LLM ###
             input_embedding = self.llamacasual.get_input_embeddings()(input_ids)
             input_embedding = torch.cat([features,input_embedding], dim=1)
