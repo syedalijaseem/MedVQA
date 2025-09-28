@@ -95,6 +95,9 @@ def main():
     df_test_open[['image_name', 'question', 'answer']].to_csv(os.path.join(args.output_dir, "test_open.csv"), index=False)
     df_test_close[['image_name', 'question', 'answer']].to_csv(os.path.join(args.output_dir, "test_close.csv"), index=False)
 
+    # FIXED: Save a combined test.csv for the Trainer's evaluation step
+    df_test[['image_name', 'question', 'answer']].to_csv(os.path.join(args.output_dir, "test.csv"), index=False)
+
     print(f"\n--- Final Data Summary ---")
     print(f"Training Questions: {len(df_train)}")
     print(f"Test Questions: {len(df_test)}")
