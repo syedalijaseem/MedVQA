@@ -81,8 +81,8 @@ def main():
     
     model = QA_model(model_args)
     
-    # This line enables fine-tuning. Comment it out for "no_pretrain" baseline experiments.
-    model.load_state_dict(torch.load(ckp_path, map_location='cpu'))
+    # FIXED: Added strict=False to correctly load the LoRA adapter
+    model.load_state_dict(torch.load(ckp_path, map_location='cpu'), strict=False)
 
     print('Start training')
     trainer = Trainer(
