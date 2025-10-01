@@ -145,7 +145,7 @@ class QA_model(nn.Module):
         model = transformers.LlamaForCausalLM.from_pretrained(
            model_args.model_path,
            torch_dtype=torch.bfloat16,  # performance and memory savings
-           device_map="auto"           # loads sharded checkpoints
+        #    device_map="auto"           # loads sharded checkpoints
         )
         if model_args.checkpointing:
             model.gradient_checkpointing_enable()

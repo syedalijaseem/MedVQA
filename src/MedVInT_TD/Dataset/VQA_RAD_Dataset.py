@@ -13,8 +13,6 @@ class VQA_RAD_Dataset(Dataset):
         csv_path (str): Path to the CSV file containing the dataset.
         tokenizer_path (str): Path to the pretrained Hugging Face tokenizer directory.
         img_dir (str): Directory where the images are stored.
-        seq_length (int): The maximum sequence length for text inputs.
-        img_tokens (int): The number of tokens to reserve for the image features.
         mode (str): The dataset mode, either 'Train' or 'Test'.
     """
     def __init__(self, csv_path: str, tokenizer_path: str, img_dir: str,
@@ -61,8 +59,6 @@ class VQA_RAD_Dataset(Dataset):
         sample = self.data.iloc[idx]
         question = sample['question']
         answer = str(sample['answer'])
-        
-        # FIXED #1: Use 'image_name' to match the CSV header
         image_name = sample['image_name']
         
         img_path = os.path.join(self.img_root, image_name)
@@ -74,45 +70,35 @@ class VQA_RAD_Dataset(Dataset):
             return self.__getitem__((idx + 1) % len(self))
 
         prompt = 'Question: ' + question + 'The Answer is:'
+        full_text = prompt + answer
 
-        if self.mode == 'Train':
-            full_text = prompt + answer
-            tokenized_full_text = self.tokenizer(
-                full_text, max_length=self.seq_length, padding='max_length',
-                truncation=True, return_tensors='pt'
-            )
-            input_ids = tokenized_full_text.input_ids.squeeze(0)
-            labels = input_ids.clone()
-            
-            tokenized_prompt = self.tokenizer(
-                prompt, max_length=self.seq_length, truncation=True, return_tensors='pt'
-            )
-            prompt_len = tokenized_prompt.input_ids.squeeze(0).shape[0]
+        tokenized_full_text = self.tokenizer(
+            full_text, max_length=self.seq_length, padding='max_length',
+            truncation=True, return_tensors='pt'
+        )
+        input_ids = tokenized_full_text.input_ids.squeeze(0)
+        
+        labels = input_ids.clone()
+        
+        tokenized_prompt = self.tokenizer(
+            prompt, max_length=self.seq_length, truncation=True, return_tensors='pt'
+        )
+        prompt_len = tokenized_prompt.input_ids.squeeze(0).shape[0]
 
-            labels[:prompt_len] = -100
-            labels[labels == self.tokenizer.pad_token_id] = -100
+        labels[:prompt_len] = -100
+        labels[labels == self.tokenizer.pad_token_id] = -100
 
-            final_labels = torch.cat([
-                torch.tensor(self.img_padding, dtype=torch.long), labels
-            ], dim=0)
+        final_labels = torch.cat([
+            torch.tensor(self.img_padding, dtype=torch.long), labels
+        ], dim=0)
 
-            return {
-                'input_ids': input_ids,
-                'images': image_tensor,
-                'labels': final_labels,
-            }
-        else: # Test mode
-            tokenized_prompt = self.tokenizer(
-                prompt, max_length=self.seq_length, padding='max_length',
-                truncation=True, return_tensors='pt'
-            )
-            input_ids = tokenized_prompt.input_ids.squeeze(0)
-
-            # FIXED #2: Added 'image_name' to the dictionary returned in Test mode
-            return {
-                'input_ids': input_ids,
-                'images': image_tensor,
-                'answer': answer,
-                'question': question,
-                'image_name': image_name, 
-            }
+        # This universal dictionary serves both the Trainer (needs labels)
+        # and our separate test script (needs raw text).
+        return {
+            'input_ids': input_ids,
+            'images': image_tensor,
+            'labels': final_labels,
+            'question': question,
+            'answer': answer,
+            'image_name': image_name
+        }
