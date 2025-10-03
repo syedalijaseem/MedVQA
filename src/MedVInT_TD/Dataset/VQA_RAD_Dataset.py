@@ -69,36 +69,54 @@ class VQA_RAD_Dataset(Dataset):
             print(f"Warning: Image file not found at {img_path}. Skipping to next item.")
             return self.__getitem__((idx + 1) % len(self))
 
-        prompt = 'Question: ' + question + 'The Answer is:'
-        full_text = prompt + answer
+        if self.mode == 'Train':
+            # For training, combine question and answer for teacher-forcing
+            prompt = f"Question: {question}\nAnswer:"
+            # Add EOS token at the end of the answer for training
+            full_text = prompt + answer + self.tokenizer.eos_token
 
-        tokenized_full_text = self.tokenizer(
-            full_text, max_length=self.seq_length, padding='max_length',
-            truncation=True, return_tensors='pt'
-        )
-        input_ids = tokenized_full_text.input_ids.squeeze(0)
-        
-        labels = input_ids.clone()
-        
-        tokenized_prompt = self.tokenizer(
-            prompt, max_length=self.seq_length, truncation=True, return_tensors='pt'
-        )
-        prompt_len = tokenized_prompt.input_ids.squeeze(0).shape[0]
+            tokenized_full_text = self.tokenizer(
+                full_text, max_length=self.seq_length, padding='max_length',
+                truncation=True, return_tensors='pt'
+            )
+            input_ids = tokenized_full_text.input_ids.squeeze(0)
+            
+            # Create labels for loss calculation, masking the prompt part
+            labels = input_ids.clone()
+            
+            # Tokenize prompt separately to find its length for masking
+            tokenized_prompt = self.tokenizer(
+                prompt, max_length=self.seq_length, truncation=True, return_tensors='pt'
+            )
+            prompt_len = tokenized_prompt.input_ids.squeeze(0).shape[0]
 
-        labels[:prompt_len] = -100
-        labels[labels == self.tokenizer.pad_token_id] = -100
+            labels[:prompt_len] = -100
+            labels[labels == self.tokenizer.pad_token_id] = -100
 
+        else: # Test mode
+            # For testing, only provide the prompt for the model to complete
+            prompt = f"Question: {question}\nAnswer:"
+            
+            tokenized_prompt = self.tokenizer(
+                prompt, max_length=self.seq_length, padding='max_length',
+                truncation=True, return_tensors='pt'
+            )
+            input_ids = tokenized_prompt.input_ids.squeeze(0)
+
+            # For testing, labels are not needed for generation, so we create a dummy tensor
+            labels = torch.full_like(input_ids, -100)
+
+        # Prepend image token placeholders to the labels
         final_labels = torch.cat([
             torch.tensor(self.img_padding, dtype=torch.long), labels
         ], dim=0)
 
-        # This universal dictionary serves both the Trainer (needs labels)
-        # and our separate test script (needs raw text).
+        # This universal dictionary serves both training and testing
         return {
             'input_ids': input_ids,
             'images': image_tensor,
             'labels': final_labels,
-            'question': question,
-            'answer': answer,
+            'question': question, # Return raw text for logging/evaluation
+            'answer': answer,     # Return raw text for logging/evaluation
             'image_name': image_name
         }
